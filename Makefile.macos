@@ -1,0 +1,13 @@
+# for MacOS you have to install plib with a macports
+
+all: zbik3d
+
+CXXFLAGS?=-Wall -O2 -g -I/opt/local/include -I/usr/X11/include
+
+zbik3d: zbik3d.o irp6.o polycrank.o
+	$(CXX) $(LDFLAGS) -o $@ $^ -L/opt/local/lib \
+		-lplibpu -lplibfnt -lplibul -lplibnet -lpthread \
+		-framework GLUT -framework OpenGL
+
+clean:
+	rm -f *.o zbik3d
