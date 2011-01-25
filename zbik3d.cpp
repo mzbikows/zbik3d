@@ -1,6 +1,6 @@
 /******************************************************************************
  *Zbik3D
- *Author:Mariusz Żbikowski
+ *Author:Mariusz ���bikowski
  *****************************************************************************/
 
 //JOINTS ( POLYCRANK )
@@ -21,11 +21,10 @@
 
 //SYNCHRONIZATION
 #include <pthread.h>
-#include <semaphore.h>
 
-//PLIB NET
-#include <plib/net.h>
-#include <plib/ul.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 //IO
 #include <iostream>
@@ -54,6 +53,9 @@ char hostip_postument[16] = "127.0.0.1";
 int hostport_postument = 50001;
 char hostip_track[16] = "127.0.0.1";
 int hostport_track = 50000;
+
+int socket_postument;
+int socket_track;
 
 /* Variable controlling various rendering modes. */
 static int stencilReflection = 1, stencilShadow = 1, offsetShadow = 1;
@@ -245,7 +247,7 @@ void init()
 	crankq9finger1 = GenPolycrankFinger1List();
 	crankq9finger2 = GenPolycrankFinger2List();
 
-	other = GenOtherList(); //Sto�
+	other = GenOtherList(); //Sto���
     d1 = GenTrackQ1List(); //TorJezdny
 	q2 = GenTrackQ2List(); //KorpusObrot
 	q3 = GenTrackQ3List(); //KolumnaPrzodTyl
@@ -3508,41 +3510,51 @@ if (track_enabled == 1)
 		char bufor[4];                   /* Temporary Buffer for string */
 		//Flags
 		int timeout_counter = 0;
-		int maxlen = 36 ;
 		int len = 0;
 		int shiftBuffer = 0;                 /* shift in Byffer per 4 bytes */
-		int len_msg = 0;
 		float current=0;
 		int synchronization = 0;
 		int i=0;
+		struct sockaddr_in servaddr;
 
-		len_msg =strlen (msg);
+		bzero(&servaddr,sizeof(servaddr));
+		servaddr.sin_family      = AF_INET;
+		servaddr.sin_addr.s_addr = inet_addr(hostip_track);
+		servaddr.sin_port        = htons(hostport_track);
 
-		netSocket sock = netSocket();
-
-		if ( ! sock.open( false ) )   /* open a UDP socket */
-		{
-			//printf ( "error opening socket\n" ) ;
-			return -1 ;
-		}
-
-		sock.setBlocking ( true ) ; /* not blocked socket */
-
-		if ( sock.connect( hostip_track, hostport_track ) == -1 )
-		{
-            diode_track->setColorScheme(1,0,0,1);
+	while(timeout_counter < 200)
+	{
+		if (sendto(socket_track, msg,strlen(msg), 0, (struct sockaddr *)&servaddr,sizeof(servaddr)) != 1) {
+			perror("sendto()");
+			diode_track->setColorScheme(1,0,0,1);
 			track_enabled = 0;
 			mk_dialog ( "Error connecting to TRACK" ) ;
 			button_track->setValue ( 0 ) ;
-			return 0;
+			return -1;
 		}
 
+		fd_set rfds;
+		FD_ZERO(&rfds);
+		FD_SET(socket_track, &rfds);
 
+		struct timeval timeout;
 
-	while(1)
-	{
-		sock.send( msg, len_msg, 0 );
-		len = sock.recv(Buffer, maxlen, 0);
+		timeout.tv_sec  = 0;
+		timeout.tv_usec = 20000;
+ 
+		int r = select(socket_track+1, &rfds, NULL, NULL, &timeout);
+		
+		if(r < 0) {
+			perror("select()");
+			return -1;
+		} else if (r == 0) {
+			timeout_counter++;
+			continue;
+		}
+		
+		assert(FD_ISSET(socket_track, &rfds));
+
+		len=recvfrom(socket_track,Buffer,sizeof(Buffer),0,NULL,NULL);
 
 		if (len>0)
 		{
@@ -3596,26 +3608,22 @@ if (track_enabled == 1)
 			}//end of for
 			pthread_mutex_unlock(&access_tablica);
 			if(track_enabled == 0) diode_track->setColorScheme(1,0,0,1);//red
-			break;
+			return 0;
 		}//end of if len>0
 		else
 		{
-//			perror("track read failed");
+			perror("track read failed");
 
-			timeout_counter++;
-			ulMilliSecondSleep(1);
-			diode_track->setColorScheme(1,0,0,1);//red
-
-			if (timeout_counter>=4000)//timeout=4s
-			{
-				track_enabled = 0;
-				mk_dialog ( "Timeout on TRACK, try later" ) ;
-				button_track->setValue ( 0 ) ;
-				return 0;
-			}
+			ulMilliSecondSleep(20);
 		}
 	}//end of while
 
+	diode_track->setColorScheme(1,0,0,1);//red
+	track_enabled = 0;
+	mk_dialog ( "       Timeout on TRACK, try later " ) ;
+	button_track->setValue ( 0 ) ;
+
+	return -1;
 }//end of track enabled
 if (track_enabled == 0)
 { //**************TRACK*SYNCHRO****************************
@@ -3646,41 +3654,52 @@ if (postument_enabled == 1)
 		char bufor[4];                   /* Temporary Buffer for string */
 		//Flags
 		int timeout_counter = 0;
-		int maxlen = 36 ;
 		int len = 0;
 		int shiftBuffer = 0;                 /* shift in Byffer per 4 bytes */
-		int len_msg = 0;
 		float current=0;
 		int synchronization = 0;
 		int i=0;
+		struct sockaddr_in servaddr;
 
-		len_msg =strlen (msg);
+		bzero(&servaddr,sizeof(servaddr));
+		servaddr.sin_family      = AF_INET;
+		servaddr.sin_addr.s_addr = inet_addr(hostip_postument);
+		servaddr.sin_port        = htons(hostport_postument);
 
-		netSocket sock = netSocket () ;
 
-		if ( ! sock.open( false ) )   /* open a UDP socket */
-		{
-			//printf ( "error opening socket\n" ) ;
-			return -1 ;
-		}
-
-		sock.setBlocking ( true ) ; /* not blocked socket */
-
-		if ( sock.connect( hostip_postument, hostport_postument ) == -1 )
-		{
+	while(timeout_counter < 200)
+	{
+		if (sendto(socket_postument, msg,strlen(msg), 0, (struct sockaddr *)&servaddr,sizeof(servaddr)) != 1) {
+			perror("sendto()");
 			diode_postument->setColorScheme(1,0,0,1);
 			postument_enabled = 0;
 			mk_dialog2 ( "Error connecting to POSTUMENT" ) ;
 			button_postument->setValue ( 0 ) ;
-			return 0;
+			return -1;
 		}
 
+		fd_set rfds;
+		FD_ZERO(&rfds);
+		FD_SET(socket_postument, &rfds);
 
+		struct timeval timeout;
 
-	while(1)
-	{
-		sock.send( msg, len_msg, 0 );
-		len = sock.recv(Buffer, maxlen, 0);
+		timeout.tv_sec  = 0;
+		timeout.tv_usec = 20000;
+
+		int r = select(socket_postument+1, &rfds, NULL, NULL, &timeout);
+		
+		if(r < 0) {
+			perror("select()");
+			return -1;
+		} else if (r == 0) {
+			timeout_counter++;
+			continue;
+		}
+		
+		assert(FD_ISSET(socket_postument, &rfds));
+
+		len=recvfrom(socket_postument,Buffer,sizeof(Buffer),0,NULL,NULL);
 
 		if (len>0)
 		{
@@ -3732,27 +3751,22 @@ if (postument_enabled == 1)
 			}
 			pthread_mutex_unlock(&access_tablica);
 			if(postument_enabled == 0) diode_postument->setColorScheme(1,0,0,1);//red
-			break;
+			return 0;
 		}
 		else
 		{
-//			perror("postument read failed");
+			perror("postument read failed");
 
-			diode_postument->setColorScheme(1,0,0,1);//red
-			timeout_counter++;
-			ulMilliSecondSleep(1);
-
-			if (timeout_counter>=4000)//timeout=4s
-			{
-				postument_enabled = 0;
-				mk_dialog2 ( "       Timeout on POSTUMENT, try later " ) ;
-				button_postument->setValue ( 0 ) ;
-
-				return 0;
-			}
+			ulMilliSecondSleep(20);
 		}
 	}//end of while
 
+	diode_postument->setColorScheme(1,0,0,1);//red
+	postument_enabled = 0;
+	mk_dialog2 ( "       Timeout on POSTUMENT, try later " ) ;
+	button_postument->setValue ( 0 ) ;
+
+	return -1;
 }//end of postument enabled
 if (postument_enabled == 0)
 {//***************POSTUMENT*SYNCHRO***********************
@@ -3881,11 +3895,16 @@ int main(int argc, char *argv[])
 {
 	pthread_t th1, th2, th3;
 
+	// Initialize UDP sockets
+	socket_postument = socket(AF_INET,SOCK_DGRAM,0);
+	assert(socket_postument >= 0);
+
+	socket_track = socket(AF_INET,SOCK_DGRAM,0);
+	assert(socket_track >= 0);
+
 	pthread_mutex_init(&access_tablica, NULL);
 	pthread_mutex_init(&receive_mtx, NULL);
 	pthread_cond_init(&receive_cond, NULL);
-
-	netInit();
 
 	pthread_create(&th1, NULL, track, NULL);       //watek pobierajacy aktualne polozenia robota track
 	pthread_create(&th2, NULL, postument, NULL);   //watek pobierajacy aktualne polozenia robota postument
@@ -3900,6 +3919,9 @@ int main(int argc, char *argv[])
 	pthread_mutex_destroy(&access_tablica);
 	pthread_mutex_destroy(&receive_mtx);
 	pthread_cond_destroy(&receive_cond);
+
+	close(socket_postument);
+	close(socket_track);
 
 	return 0;
 }
